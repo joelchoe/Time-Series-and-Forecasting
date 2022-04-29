@@ -1,0 +1,321 @@
+---
+title: "CAS MA 585 Final Project"
+author: "Joel Choe Yee Hsien (U22167011)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/Joel Choe/Desktop/CAS MA 585/Final Project")
+library(tidyverse)
+library(TSA)
+library(tseries)
+library(MASS)
+library(forecast)
+library(urca)
+library(stats4)
+library(sarima)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(astsa)
+library(gridExtra)
+library(anytime)
+```
+
+
+Load dataset
+```{r a}
+food_price_index <- read_csv('food_price_index.csv') %>% filter(Series_title_1 == 'Food')
+data <- food_price_index[, c("Period", "Data_value")]
+data <- data %>% filter(Period > 2000)
+colnames(data) <- c('date', 'value')
+data.start_time <- ymd(anydate(as.character(data$date[[1]]))) %>% print()
+data.end_time <- ymd(anydate(as.character(data$date[[nrow(data)]]))) %>% print()
+data.freq <- 12
+```
+
+Check for outliers
+
+```{r b}
+ggplot(data) +
+  aes(x = "", y = value) +
+  geom_boxplot() +
+  theme_minimal()
+```
+
+Convert data to time series and plot data points
+
+```{r c}
+data_all <- ts(data$value, start = c(year(data.start_time), month(data.start_time)), end = c(year(data.end_time), month(data.end_time)), frequency = data.freq)
+plot(data_all, main = "Monthly Food Price Index in New Zealand", xlab = "Year", ylab = "Food Price Index")
+```
+
+Basic Description of the data
+
+```{r d}
+min(data_all)
+max(data_all)
+mean(data_all)
+```
+
+Test for stationarity
+
+```{r e}
+kpss.test(data_all)
+adf.test(data_all)
+```
+
+Classical Decomposition
+
+```{r f}
+autoplot(decompose(data_all))
+```
+
+ACF and PACF
+
+```{r g}
+ggtsdisplay(data_all)
+```
+
+Split dataset to generate train and test set
+
+```{r h}
+data_train <- head(data_all, round(0.8 * length(data_all)))
+data_test <- tail(data_all, round(length(data_all) - round(0.8 * length(data_all))))
+print(length(data_train))
+print(length(data_test))
+```
+
+Finding a suitable SARIMA model
+
+```{r i}
+data_train_lag <- diff(data_train, lag = data.freq)
+ggtsdisplay(data_train_lag, main  = "Lag-12 Seasonal Differencing", ylab  = "Food Price Index", xlab  = "Year")
+```
+
+```{r j}
+data_train_diff_lag = diff(diff(data_train, lag = 2), lag = 12)
+ggtsdisplay(data_train_diff_lag, main  = "Lag-12 + Diff-2 Seasonal Differencing", ylab  = "Food Price Index", xlab  = "Year")
+```
+
+```{r k}
+kpss.test(data_train_diff_lag)
+adf.test(data_train_diff_lag)
+```
+
+First ARMA Model
+
+```{r l}
+arma_model = Arima(data_train, order = c(3, 2, 1), seasonal = list(order = c(1, 1, 1), period = data.freq))
+checkresiduals(arma_model)
+tsdiag(arma_model)
+qqnorm(arma_model$residuals)
+qqline(arma_model$residuals)
+AIC(arma_model)
+BIC(arma_model)
+summary(arma_model)
+```
+
+Fitting an ARMA Model
+
+```{r m}
+arma_model = Arima(data_train, order = c(3, 2, 3), seasonal = list(order = c(1, 1, 1), period = data.freq))
+checkresiduals(arma_model)
+tsdiag(arma_model)
+qqnorm(arma_model$residuals)
+qqline(arma_model$residuals)
+AIC(arma_model)
+BIC(arma_model)
+summary(arma_model)
+```
+
+```{r n}
+arma_model_pred <- forecast(arma_model, h = length(data_test))
+plot(arma_model_pred)
+lines(data_test)
+```
+
+```{r o}
+accuracy(arma_model_pred, data_test)
+```
+
+
+Fitting an AR Model
+
+```{r p}
+ar_model = Arima(data_train, order = c(3, 2, 0), seasonal = list(order = c(1, 1, 0), period = data.freq))
+checkresiduals(ar_model)
+tsdiag(ar_model)
+qqnorm(ar_model$residuals)
+qqline(ar_model$residuals)
+AIC(ar_model)
+BIC(ar_model)
+summary(ar_model)
+```
+
+```{r q}
+ar_model_pred <- forecast(ar_model, h = length(data_test))
+plot(ar_model_pred)
+lines(data_test)
+```
+
+```{r s}
+accuracy(ar_model_pred, data_test)
+```
+
+Fitting a MA model
+
+```{r t}
+ma_model = Arima(data_train, order = c(0, 2, 3), seasonal = list(order = c(0, 1, 1), period = data.freq))
+checkresiduals(ma_model)
+tsdiag(ma_model)
+qqnorm(ma_model$residuals)
+qqline(ma_model$residuals)
+AIC(ma_model)
+BIC(ma_model)
+summary(ma_model)
+```
+
+```{r u}
+ma_model_pred <- forecast(ma_model, h = length(data_test))
+plot(ma_model_pred)
+lines(data_test)
+```
+
+```{r v}
+accuracy(ma_model_pred, data_test)
+```
+
+Brute Force Algo
+
+AIC
+
+```{r w}
+p_list <- c()
+q_list <- c()
+P_list <- c()
+Q_list <- c()
+aic_score <- c()
+minimum <- Inf
+best <- c()
+for(p in c(0, 1, 2, 3, 4)) {
+  for(q in c(0, 1, 2, 3, 4)) {
+    for(P in c(0, 1)) {
+      for(Q in c(0, 1)) {
+        arma_model <- Arima(data_train, order = c(p, 2, q), seasonal = list(order = c(P, 1, Q), period = data.freq))
+        p_list <- c(p_list, p)
+        q_list <- c(q_list, q)
+        P_list <- c(P_list, P)
+        Q_list <- c(Q_list, Q)
+        aic_score <- c(aic_score, AIC(arma_model))
+        if(AIC(arma_model) < minimum) {
+          minimum <- AIC(arma_model)
+          best <- c(p, q, P, Q)
+          print(AIC(arma_model))
+          print(best)
+        }
+      }
+    }
+  }
+}
+```
+
+```{r x}
+arma_model_aic <- Arima(data_train, order = c(2, 2, 3), seasonal = list(order = c(1, 1, 1), period = data.freq))
+checkresiduals(arma_model_aic)
+tsdiag(arma_model_aic)
+qqnorm(arma_model_aic$residuals)
+qqline(arma_model_aic$residuals)
+AIC(arma_model_aic)
+BIC(arma_model_aic)
+summary(arma_model_aic)
+```
+
+```{r y}
+arma_model_aic_pred <- forecast(arma_model_aic, h = length(data_test))
+plot(arma_model_aic_pred, main = "Prediction of Food Price Index of SARIMA(2,2,3)(1,1,1)")
+lines(data_test)
+```
+
+```{r ae}
+accuracy(arma_model_aic_pred, data_test)
+```
+
+BIC
+
+```{r z}
+p_list <- c()
+q_list <- c()
+P_list <- c()
+Q_list <- c()
+bic_score <- c()
+minimum <- Inf
+best <- c()
+for(p in c(0, 1, 2, 3, 4)) {
+  for(q in c(0, 1, 2, 3, 4)) {
+    for(P in c(0, 1)) {
+      for(Q in c(0, 1)) {
+        arma_model <- Arima(data_train, order = c(p, 2, q), seasonal = list(order = c(P, 1, Q), period = data.freq))
+        p_list <- c(p_list, p)
+        q_list <- c(q_list, q)
+        P_list <- c(P_list, P)
+        Q_list <- c(Q_list, Q)
+        bic_score <- c(bic_score, BIC(arma_model))
+        if(BIC(arma_model) < minimum) {
+          minimum <- BIC(arma_model)
+          best <- c(p, q, P, Q)
+          print(BIC(arma_model))
+          print(best)
+        }
+      }
+    }
+  }
+}
+```
+
+```{r aa}
+arma_model_bic <- Arima(data_train, order = c(0, 2, 1), seasonal = list(order = c(0, 1, 1), period = data.freq))
+checkresiduals(arma_model_bic)
+tsdiag(arma_model_bic)
+qqnorm(arma_model_bic$residuals)
+qqline(arma_model_bic$residuals)
+AIC(arma_model_bic)
+BIC(arma_model_bic)
+summary(arma_model_bic)
+```
+
+```{r ab}
+arma_model_bic_pred <- forecast(arma_model_bic, h = length(data_test))
+plot(arma_model_bic_pred)
+lines(data_test)
+```
+
+```{r af}
+accuracy(arma_model_bic_pred, data_test)
+```
+
+Holt-Winters Forecast
+
+```{r ac}
+model_HW_add <- HoltWinters(data_train, seasonal = "additive")
+pred_HW_add <- forecast(model_HW_add, h = length(data_test))
+plot(pred_HW_add)
+lines(data_test)
+```
+
+```{r ad}
+accuracy(pred_HW_add, data_test) %>% print()
+```
+
+```{r ag}
+model_HW_add_full <- HoltWinters(data_all, seasonal = "additive")
+pred_HW_add_full <- forecast(model_HW_add_full, h = 16)
+plot(pred_HW_add_full)
+pred_HW_add_full
+```
+
+
